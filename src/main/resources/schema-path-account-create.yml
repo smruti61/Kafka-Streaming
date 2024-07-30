@@ -1,0 +1,112 @@
+type: object
+properties:
+  event_id:
+    type: string
+  timestamp:
+    type: string
+  vault_version:
+    type: object
+    properties:
+      major:
+        type: integer
+      minor:
+        type: integer
+      patch:
+        type: integer
+      label:
+        type: string
+  change_id:
+    type: string
+  account_created:
+    type: object
+    properties:
+      account:
+        type: object
+        properties:
+          id:
+            type: string
+          name:
+            type: string
+          product_id:
+            type: string
+          product_version_id:
+            type: string
+          permitted_denominations:
+            type: array
+            items:
+              type: string
+              enum:
+                - USD
+                - EUR
+                - GBP
+                - JPY
+                - AUD
+          status:
+            type: string
+          opening_timestamp:
+            type: string
+          closing_timestamp:
+            type: [string, null]
+          stakeholder_ids:
+            type: array
+            items:
+              type: string
+          instance_param_vals:
+            type: object
+            properties:
+              account_indicators:
+                type: string
+              account_legal_entity:
+                type: string
+              account_max_balance:
+                type: string
+              account_min_balance:
+                type: string
+              account_rate:
+                type: string
+              account_term:
+                type: string
+              early_closure:
+                type: string
+              manual_remit:
+                type: string
+              manual_statement:
+                type: string
+              maturity_date:
+                type: string
+              remittance_account:
+                type: string
+          derived_instance_param_vals:
+            type: object
+            properties: {}
+          details:
+            type: object
+            properties:
+              account_type:
+                type: string
+              brand:
+                type: string
+              default_currency:
+                type: string
+          accounting:
+            type: object
+            properties:
+              tside:
+                type: string
+        required:
+          - id
+          - name
+          - product_id
+          - product_version_id
+          - permitted_denominations
+          - status
+          - opening_timestamp
+          - stakeholder_ids
+    required:
+      - account
+required:
+  - event_id
+  - timestamp
+  - vault_version
+  - change_id
+  - account_created

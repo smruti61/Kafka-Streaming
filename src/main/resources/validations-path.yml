@@ -1,0 +1,4 @@
+your_topic_name:
+  columns_validations:
+    event_id:
+      - unique
