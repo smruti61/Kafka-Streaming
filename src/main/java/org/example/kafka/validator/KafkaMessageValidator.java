@@ -22,8 +22,8 @@ public class KafkaMessageValidator {
     private static final Logger logger = LoggerFactory.getLogger(KafkaMessageValidator.class);
     private final KafkaConsumer<String, String> consumer;
     private final ObjectMapper mapper;
-    private final JsonSchema schema;
-    private final Map<String, Map<String, Object>> columnValidations;
+    private final JsonSchema jsonSchema;
+    private final Map<String, Map<String, Object>> customValidations;
 
     public KafkaMessageValidator(String bootstrapServers, String groupId, String schemaPath, String validationsPath) throws Exception {
         logger.info("Initializing KafkaMessageValidator...");
@@ -35,8 +35,8 @@ public class KafkaMessageValidator {
 
         consumer = new KafkaConsumer<>(properties);
         mapper = new ObjectMapper(new YAMLFactory());
-        schema = loadJsonSchema(schemaPath);
-        columnValidations = loadYaml(validationsPath);
+        jsonSchema = loadJsonSchema(schemaPath);
+        customValidations = loadValidationsYaml(validationsPath);
         logger.info("KafkaMessageValidator initialized successfully.");
     }
 
@@ -56,7 +56,7 @@ public class KafkaMessageValidator {
     }
 
     @SuppressWarnings("unchecked")
-    private <T> T loadYaml(String path) throws Exception {
+    private <T> T loadValidationsYaml (String path) throws Exception {
         logger.info("Loading YAML File...");
         try (InputStream inputStream = getClass().getClassLoader().getResourceAsStream(path)) {
             if (inputStream == null) {
@@ -67,22 +67,25 @@ public class KafkaMessageValidator {
         }
     }
 
-    public boolean validateMessage(String jsonData, String topic) throws Exception {
+    public boolean  validateMessage(String jsonData, String topic) throws Exception {
         logger.info("Started Validating message: "+jsonData);
-        JsonNode jsonNode = mapper.readTree(jsonData);
 
-        Set<ValidationMessage> errors = schema.validate(jsonNode);
+        JsonNode jsonDataNode = mapper.readTree(jsonData);
+
+        Set<ValidationMessage> errors = jsonSchema.validate(jsonDataNode);
+
         if (errors.isEmpty()) {
-            if (columnValidations.containsKey(topic)) {
-                boolean result = applyColumnValidations(jsonNode, columnValidations.get(topic));
-                logger.info("Message validation result: {}", result);
+            logger.info("Schema validations passed.");
+            if (customValidations.containsKey(topic)) {
+                boolean result = applyCustomValdiations(jsonDataNode, customValidations.get(topic));
+                logger.info("Custom validation result: {}", result);
                 return result;
             }
-            logger.info("Message validation passed.");
+            logger.info("Custom validation passed.");
             return true;
         } else {
             logValidationErrors(errors);
-            logger.info("Message validation failed.");
+            logger.info("Schema validation failed.");
             return false;
         }
     }
@@ -93,8 +96,8 @@ public class KafkaMessageValidator {
         }
     }
 
-    private boolean applyColumnValidations(JsonNode jsonNode, Map<String, Object> validations) {
-        logger.info("Applying column validations...");
+    private boolean applyCustomValdiations(JsonNode jsonNode, Map<String, Object> validations) {
+        logger.info("Applying Custom validations...");
         boolean isValid = true;
         for (Map.Entry<String, Object> entry : validations.entrySet()) {
             String columnName = entry.getKey();
@@ -110,9 +113,12 @@ public class KafkaMessageValidator {
                     isValid = false;
                 }
 
-                if (rules.containsKey("nullable") && columnNode.isNull()) {
-                    continue;
+                if (rules.containsKey("non-nullable") && columnNode.isNull()) {
+                    logger.error("Validation failed: Field {} is not allowed to be null.", columnName);
+                    isValid = false;
                 }
+
+//
             }
         }
         logger.info("Column validations applied.");

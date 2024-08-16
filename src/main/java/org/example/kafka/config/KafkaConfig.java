@@ -79,6 +79,38 @@ public class KafkaConfig {
         return getRequiredProperty("kafka.streams.account_create.state-store");
     }
 
+    public static String getAccountUpdateInputTopic() {
+        return getRequiredProperty("kafka.streams.account_update.input");
+    }
+
+    public static String getAccountUpdateDeadLetterTopic() {
+        return getRequiredProperty("kafka.streams.account_update.dead-letter-topic");
+    }
+
+    public static String getAccountUpdateOutputTopic() {
+        return getRequiredProperty("kafka.streams.account_update.output");
+    }
+
+    public static String getAccountUpdateRawOutputTopic() {
+        return getRequiredProperty("kafka.streams.account_update.raw-output");
+    }
+
+    public static String getAccountUpdateGroupId() {
+        return getRequiredProperty("kafka.streams.account_update.group-id");
+    }
+
+    public static String getAccountUpdateSchemaPath() {
+        return getRequiredProperty("kafka.streams.account_update.schema-path");
+    }
+
+    public static String getAccountUpdateValidationsPath() {
+        return getRequiredProperty("kafka.streams.account_update.validations-path");
+    }
+
+    public static String getAccountUpdateStateStoreName() {
+        return getRequiredProperty("kafka.streams.account_update.state-store");
+    }
+
     public static StoreBuilder<KeyValueStore<String, String>> getStateStoreBuilder(String storeName) {
         return Stores.keyValueStoreBuilder(
                 Stores.persistentKeyValueStore(storeName),

@@ -1,0 +1,103 @@
+type: object
+properties:
+  event_id:
+    type: string
+  timestamp:
+    type: string
+  vault_version:
+    type: object
+    properties:
+      major:
+        type: integer
+      minor:
+        type: integer
+      patch:
+        type: integer
+      label:
+        type: string
+  change_id:
+    type: string
+  account_update_created:
+    type: object
+    properties:
+      account_update:
+        type: object
+        properties:
+          id:
+            type: string
+          account_id:
+            type: string
+          status:
+            type: string
+          activation_update:
+            type: object
+            properties: {}
+          create_timestamp:
+            type: string
+          last_status_update_timestamp:
+            type: string
+          account_update_batch_id:
+            type: string
+          job_id:
+            type: string
+          failure_reason:
+            type: string
+        required:
+          - id
+          - account_id
+          - status
+          - activation_update
+          - create_timestamp
+          - last_status_update_timestamp
+    required:
+      - account_update
+  account_update_updated:
+    type: object
+    properties:
+      account_update:
+        type: object
+        properties:
+          id:
+            type: string
+          account_id:
+            type: string
+          status:
+            type: string
+          activation_update:
+            type: object
+            properties: {}
+          create_timestamp:
+            type: string
+          last_status_update_timestamp:
+            type: string
+          account_update_batch_id:
+            type: string
+          job_id:
+            type: string
+          failure_reason:
+            type: string
+        required:
+          - id
+          - account_id
+          - status
+          - activation_update
+          - create_timestamp
+          - last_status_update_timestamp
+      update_mask:
+        type: object
+        properties:
+          paths:
+            type: array
+            items:
+              type: string
+        required:
+          - paths
+    required:
+      - account_update
+      - update_mask
+required:
+  - event_id
+  - timestamp
+  - vault_version
+  - change_id
+  - account_update_created

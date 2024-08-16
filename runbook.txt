@@ -1,12 +1,13 @@
-PS C:\Users\yasshaik1> docker-compose up
+Step 1: docker-compose up
 
-PS C:\Users\yasshaik1> docker ps
+Step 2: docker ps
 CONTAINER ID   IMAGE                              COMMAND                  CREATED      STATUS      PORTS                                        NAMES
 db5326bebf45   confluentinc/cp-kafka:latest       "/etc/confluent/dock…"   5 days ago   Up 5 days   0.0.0.0:9092->9092/tcp                       spring-kafka-setup-main-kafka-1
 f4de43fa9a1e   confluentinc/cp-zookeeper:latest   "/etc/confluent/dock…"   5 days ago   Up 5 days   2888/tcp, 0.0.0.0:2181->2181/tcp, 3888/tcp   spring-kafka-setup-main-zookeeper-1
 
 
-PS C:\Users\yasshaik1> docker exec -it spring-kafka-setup-main-kafka-1 bash
+Step 3:
+     docker exec -it spring-kafka-setup-main-kafka-1 bash
 
 1. Start the streaming processor first
 

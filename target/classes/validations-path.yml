@@ -1,4 +1,16 @@
-your_topic_name:
+input-topic-account-create:
   columns_validations:
     event_id:
-      - unique
+      - required
+      - non-nullable
+      - something
+
+
+input-topic-account-update:
+  columns_validations:
+    event_id:
+      - required
+      - non-nullable
+
+
+# Custom validations can be added here.
