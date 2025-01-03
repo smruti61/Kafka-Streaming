@@ -74,6 +74,8 @@ def consume_from_kafka():
         'sasl.username': KAFKA_USERNAME,
         'sasl.password': KAFKA_PASSWORD,
         'auto.offset.reset': 'earliest',
+        # Optional for debugging SSL handshake issues
+        'debug': 'security,broker'
     }
 
     consumer = Consumer(consumer_config)
