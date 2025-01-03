@@ -1,0 +1,137 @@
+import json
+from confluent_kafka import Consumer
+from google.cloud import bigquery
+
+# Kafka Configuration
+KAFKA_BROKER = 'pkc-619z3.us-east1.gcp.confluent.cloud:9092'
+KAFKA_TOPIC = 'topic_611'
+KAFKA_GROUP_ID = 'plain-python-group'
+KAFKA_USERNAME = 'wwwww'
+KAFKA_PASSWORD = 'dee+Q14n2dAQUvi7EQrHRCsZAP9ZPDJ810Xfi15ueQRiZUxv2Y'
+
+# BigQuery Configuration
+PROJECT_ID = 'active-brand-445914-d1'
+DATASET_ID = 'test61'
+TABLE_ID = 'kafkatobq61'
+
+def ensure_bigquery_table(schema):
+    """Ensure the BigQuery table exists, create it dynamically if necessary."""
+    client = bigquery.Client(project=PROJECT_ID)
+    dataset_ref = client.dataset(DATASET_ID)
+
+    # Check if dataset exists, create if not
+    try:
+        client.get_dataset(dataset_ref)
+    except Exception:
+        print(f"Dataset {DATASET_ID} not found. Creating dataset...")
+        dataset = bigquery.Dataset(dataset_ref)
+        client.create_dataset(dataset)
+        print(f"Dataset {DATASET_ID} created.")
+
+    table_ref = dataset_ref.table(TABLE_ID)
+    try:
+        client.get_table(table_ref)
+        print(f"Table {TABLE_ID} exists.")
+    except Exception:
+        print(f"Table {TABLE_ID} not found. Creating table...")
+        table = bigquery.Table(table_ref, schema=schema)
+        client.create_table(table)
+        print(f"Table {TABLE_ID} created dynamically.")
+
+
+def infer_schema_from_message(message):
+    """Infer BigQuery schema from a Kafka message."""
+    def infer_field(name, value):
+        if isinstance(value, int):
+            field_type = "INTEGER"
+        elif isinstance(value, float):
+            field_type = "FLOAT"
+        elif isinstance(value, dict):
+            field_type = "RECORD"
+        elif isinstance(value, list):
+            field_type = "REPEATED"
+        else:
+            field_type = "STRING"
+        return bigquery.SchemaField(name, field_type, mode="NULLABLE")
+
+    fields = []
+    for key, value in message.items():
+        if isinstance(value, dict):
+            subfields = [infer_field(subkey, subvalue) for subkey, subvalue in value.items()]
+            fields.append(bigquery.SchemaField(key, "RECORD", mode="NULLABLE", fields=subfields))
+        else:
+            fields.append(infer_field(key, value))
+    return fields
+
+
+def consume_from_kafka():
+    """Consume messages from Kafka."""
+    consumer_config = {
+        'bootstrap.servers': KAFKA_BROKER,
+        'group.id': KAFKA_GROUP_ID,
+        'security.protocol': 'SASL_SSL',
+        'sasl.mechanism': 'PLAIN',
+        'sasl.username': KAFKA_USERNAME,
+        'sasl.password': KAFKA_PASSWORD,
+        'auto.offset.reset': 'earliest',
+    }
+
+    consumer = Consumer(consumer_config)
+    consumer.subscribe([KAFKA_TOPIC])
+    return consumer
+
+
+def insert_into_bigquery(rows):
+    """Insert rows into BigQuery."""
+    client = bigquery.Client(project=PROJECT_ID)
+    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+
+    errors = client.insert_rows_json(table_ref, rows)
+    if errors:
+        print(f"Error inserting rows: {errors}")
+    else:
+        print(f"Successfully inserted {len(rows)} rows into BigQuery.")
+
+
+def parse_message(message):
+    """Parse a single Kafka message into JSON format."""
+    try:
+        data = json.loads(message.value().decode('utf-8'))
+        return data
+    except (json.JSONDecodeError, AttributeError) as e:
+        print(f"Error parsing message: {e}")
+        return None
+
+
+def main():
+    consumer = consume_from_kafka()
+    print("Consuming messages from Kafka...")
+
+    schema_inferred = False
+    schema = None
+
+    try:
+        while True:
+            msg = consumer.poll(1.0)  # Timeout in seconds
+            if msg is None:
+                continue
+            if msg.error():
+                print(f"Kafka error: {msg.error()}")
+                continue
+
+            data = parse_message(msg)
+            if data:
+                if not schema_inferred:
+                    schema = infer_schema_from_message(data)
+                    ensure_bigquery_table(schema)
+                    schema_inferred = True
+
+                insert_into_bigquery([data])  # Insert each message as a row
+    except KeyboardInterrupt:
+        print("Stopping consumer...")
+    finally:
+        consumer.close()
+
+
+if __name__ == "__main__":
+    main()
