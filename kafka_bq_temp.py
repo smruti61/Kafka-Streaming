@@ -1,56 +1,106 @@
-import argparse
 import json
 from confluent_kafka import Consumer
 from google.cloud import bigquery
 
-def ensure_bigquery_table(dataset_id, table_id, schema, project_id):
+# Kafka Configuration
+KAFKA_BROKER = 'kafka.sbs-bld.oncp.dev:9092'
+KAFKA_TOPIC = 'vault.core_api.v1.accounts.account_staging.events'
+KAFKA_GROUP_ID = 'plain-python-group'
+KAFKA_USERNAME = 'easy-access-user'
+KAFKA_PASSWORD = 'easy-access-secret'
+
+# BigQuery Configuration
+PROJECT_ID = 'dmn01-ptdca-bld-01-08cf'
+DATASET_ID = 'test'
+TABLE_ID = 'personal_savings_account_event'
+
+
+def ensure_bigquery_table(schema):
     """Ensure the BigQuery table exists, create it dynamically if necessary."""
-    print(f"Ensuring BigQuery table {table_id} in dataset {dataset_id} exists...")
-    client = bigquery.Client(project=project_id)
-    dataset_ref = client.dataset(dataset_id)
+    print("Ensuring BigQuery table exists...")
+    client = bigquery.Client(project=PROJECT_ID)
+    dataset_ref = client.dataset(DATASET_ID)
 
     # Check if dataset exists, create if not
     try:
         client.get_dataset(dataset_ref)
-        print(f"Dataset {dataset_id} exists.")
+        print(f"Dataset {DATASET_ID} exists.")
     except Exception:
-        print(f"Dataset {dataset_id} not found. Creating dataset...")
+        print(f"Dataset {DATASET_ID} not found. Creating dataset...")
         dataset = bigquery.Dataset(dataset_ref)
         client.create_dataset(dataset)
-        print(f"Dataset {dataset_id} created.")
+        print(f"Dataset {DATASET_ID} created.")
 
-    table_ref = dataset_ref.table(table_id)
+    table_ref = dataset_ref.table(TABLE_ID)
     try:
         client.get_table(table_ref)
-        print(f"Table {table_id} exists.")
+        print(f"Table {TABLE_ID} exists.")
     except Exception:
-        print(f"Table {table_id} not found. Creating table...")
-        try:
-            table = bigquery.Table(table_ref, schema=schema)
-            client.create_table(table)
-            print(f"Table {table_id} created dynamically.")
-        except Exception as e:
-            print(f"Error creating table: {e}")
-            raise
+        print(f"Table {TABLE_ID} not found. Creating table...")
+        print(f"Schema being used to create the table: {schema}")
+        table = bigquery.Table(table_ref, schema=schema)
+        client.create_table(table)
+        print(f"Table {TABLE_ID} created dynamically.")
 
 
-def consume_from_kafka(topic, kafka_broker, group_id, username, password):
+def infer_schema_from_message(message):
+    """Infer BigQuery schema from a Kafka message."""
+    print("Inferring schema from message...")
+
+    def infer_field(name, value):
+        if isinstance(value, int):
+            field_type = "INTEGER"
+        elif isinstance(value, float):
+            field_type = "FLOAT"
+        elif isinstance(value, dict):
+            field_type = "RECORD"
+        elif isinstance(value, list):
+            field_type = "REPEATED"
+        else:
+            field_type = "STRING"
+        return bigquery.SchemaField(name, field_type, mode="NULLABLE")
+
+    fields = []
+    for key, value in message.items():
+        if isinstance(value, dict):
+            subfields = [infer_field(subkey, subvalue) for subkey, subvalue in value.items()]
+            fields.append(bigquery.SchemaField(key, "RECORD", mode="NULLABLE", fields=subfields))
+        else:
+            fields.append(infer_field(key, value))
+    print(f"Inferred schema: {fields}")
+    return fields
+
+
+def consume_from_kafka():
     """Consume messages from Kafka."""
-    print(f"Setting up Kafka consumer for topic {topic}...")
+    print("Setting up Kafka consumer...")
     consumer_config = {
-        'bootstrap.servers': kafka_broker,
-        'group.id': group_id,
+        'bootstrap.servers': KAFKA_BROKER,
+        'group.id': KAFKA_GROUP_ID,
         'security.protocol': 'SASL_SSL',
         'sasl.mechanisms': 'PLAIN',
-        'sasl.username': username,
-        'sasl.password': password,
+        'sasl.username': KAFKA_USERNAME,
+        'sasl.password': KAFKA_PASSWORD,
         'auto.offset.reset': 'earliest',
     }
 
     consumer = Consumer(consumer_config)
-    consumer.subscribe([topic])
-    print(f"Subscribed to topic {topic}.")
+    consumer.subscribe([KAFKA_TOPIC])
+    print(f"Subscribed to topic {KAFKA_TOPIC}.")
     return consumer
+
+
+def insert_into_bigquery(rows):
+    """Insert rows into BigQuery."""
+    print(f"Inserting {len(rows)} rows into BigQuery...")
+    client = bigquery.Client(project=PROJECT_ID)
+    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+
+    errors = client.insert_rows_json(table_ref, rows)
+    if errors:
+        print(f"Error inserting rows: {errors}")
+    else:
+        print(f"Successfully inserted {len(rows)} rows into BigQuery.")
 
 
 def parse_message(message):
@@ -65,68 +115,17 @@ def parse_message(message):
         return None
 
 
-def infer_schema_from_message(message):
-    """Infer BigQuery schema from a Kafka message."""
-    print("Inferring schema from message...")
-
-    def infer_field(name, value):
-        if isinstance(value, int):
-            field_type = "INTEGER"
-        elif isinstance(value, float):
-            field_type = "FLOAT"
-        elif isinstance(value, str):
-            field_type = "STRING"
-        elif isinstance(value, dict):
-            if value:
-                subfields = [infer_field(subkey, subvalue) for subkey, subvalue in value.items()]
-                return bigquery.SchemaField(name, "RECORD", mode="NULLABLE", fields=subfields)
-            else:
-                return bigquery.SchemaField(name, "STRING", mode="NULLABLE")
-        elif isinstance(value, list):
-            if value and isinstance(value[0], dict):
-                subfields = [infer_field(subkey, subvalue) for subkey, subvalue in value[0].items()]
-                return bigquery.SchemaField(name, "RECORD", mode="REPEATED", fields=subfields)
-            elif value:
-                field_type = infer_field(name, value[0]).field_type if value else "STRING"
-                return bigquery.SchemaField(name, field_type, mode="REPEATED")
-            else:
-                return bigquery.SchemaField(name, "STRING", mode="REPEATED")
-        else:
-            return bigquery.SchemaField(name, "STRING", mode="NULLABLE")
-
-    fields = [infer_field(key, value) for key, value in message.items()]
-    print(f"Inferred schema: {fields}")
-    return fields
-
-
 def main():
-    # Argument parsing
-    parser = argparse.ArgumentParser(description="Kafka to BigQuery Ingestion Script")
-    parser.add_argument("--kafka-topic", required=True, help="Kafka topic name")
-    parser.add_argument("--dataset-id", required=True, help="BigQuery dataset ID")
-    parser.add_argument("--table-id", required=True, help="BigQuery table ID")
-    parser.add_argument("--project-id", required=True, help="GCP project ID")
-    args = parser.parse_args()
-
-    # Kafka Configuration
-    kafka_broker = "kafka.sbs-bld.oncp.dev:9092"
-    group_id = "test-python-group"
-    username = "easy-access-user"
-    password = "easy-access-secret"
-
-    # BigQuery Configuration
-    dataset_id = args.dataset_id
-    table_id = args.table_id
-    project_id = args.project_id
-
-    consumer = consume_from_kafka(args.kafka_topic, kafka_broker, group_id, username, password)
+    consumer = consume_from_kafka()
+    print("Starting to consume messages from Kafka...")
 
     schema_inferred = False
     schema = None
 
     try:
         while True:
-            msg = consumer.poll(1.0)
+            print("Polling for new messages...")
+            msg = consumer.poll(1.0)  # Timeout in seconds
             if msg is None:
                 print("No message received. Polling again...")
                 continue
@@ -134,19 +133,23 @@ def main():
                 print(f"Kafka error: {msg.error()}")
                 continue
 
+            print("Message received. Parsing...")
             data = parse_message(msg)
             if data:
                 if not schema_inferred:
+                    print("Inferring schema for the first time...")
                     schema = infer_schema_from_message(data)
-                    ensure_bigquery_table(dataset_id, table_id, schema, project_id)
+                    print(f"Schema inferred: {schema}")  # Print schema before table creation
+                    ensure_bigquery_table(schema)
                     schema_inferred = True
 
-                # Insert into BigQuery (function can be added here)
-                print(f"Data: {data}")
+                print("Inserting data into BigQuery...")
+                insert_into_bigquery([data])  # Insert each message as a row
     except KeyboardInterrupt:
         print("Stopping consumer...")
     finally:
         consumer.close()
+        print("Consumer closed.")
 
 
 if __name__ == "__main__":
