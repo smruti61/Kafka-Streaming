@@ -1,156 +1,82 @@
 import json
-from confluent_kafka import Consumer
-from google.cloud import bigquery
+from typing import Any, Dict, List
 
-# Kafka Configuration
-KAFKA_BROKER = 'kafka.sbs-bld.oncp.dev:9092'
-KAFKA_TOPIC = 'vault.core_api.v1.accounts.account_staging.events'
-KAFKA_GROUP_ID = 'plain-python-group'
-KAFKA_USERNAME = 'easy-access-user'
-KAFKA_PASSWORD = 'easy-access-secret'
+def bq_to_schema_registry(bq_schema: List[Dict[str, Any]]) -> Dict:
+    """
+    Convert BigQuery table schema to Schema Registry compatible JSON schema.
+    """
+    def map_bq_type(bq_type: str) -> str:
+        """Map BigQuery types to JSON schema types."""
+        mapping = {
+            "STRING": "string",
+            "INTEGER": "integer",
+            "FLOAT": "number",
+            "BOOLEAN": "boolean",
+            "RECORD": "object",
+            "TIMESTAMP": "string",
+            "DATE": "string",
+            "TIME": "string",
+            "DATETIME": "string"
+        }
+        return mapping.get(bq_type, "string")
 
-# BigQuery Configuration
-PROJECT_ID = 'dmn01-ptdca-bld-01-08cf'
-DATASET_ID = 'test'
-TABLE_ID = 'personal_savings_account_event'
+    def process_field(field: Dict[str, Any]) -> Dict:
+        """Process a single field in the BigQuery schema."""
+        field_type = map_bq_type(field["type"])
+        schema_field = {
+            "type": field_type,
+            "description": field.get("description", f"The {field_type} type is used for {field['name']}.")
+        }
 
+        # Handle nested RECORD types
+        if field["type"] == "RECORD" and field["fields"]:
+            schema_field["properties"] = {
+                sub_field["name"]: process_field(sub_field)
+                for sub_field in field["fields"]
+            }
 
-def ensure_bigquery_table(schema):
-    """Ensure the BigQuery table exists, create it dynamically if necessary."""
-    print("Ensuring BigQuery table exists...")
-    client = bigquery.Client(project=PROJECT_ID)
-    dataset_ref = client.dataset(DATASET_ID)
+        # Handle nullable fields using `oneOf`
+        if field["mode"] == "NULLABLE":
+            schema_field = {
+                "oneOf": [
+                    {"type": "null"},
+                    schema_field
+                ]
+            }
 
-    # Check if dataset exists, create if not
-    try:
-        client.get_dataset(dataset_ref)
-        print(f"Dataset {DATASET_ID} exists.")
-    except Exception:
-        print(f"Dataset {DATASET_ID} not found. Creating dataset...")
-        dataset = bigquery.Dataset(dataset_ref)
-        client.create_dataset(dataset)
-        print(f"Dataset {DATASET_ID} created.")
+        # Handle repeated fields as arrays
+        if field["mode"] == "REPEATED":
+            schema_field = {
+                "type": "array",
+                "items": schema_field
+            }
 
-    table_ref = dataset_ref.table(TABLE_ID)
-    try:
-        client.get_table(table_ref)
-        print(f"Table {TABLE_ID} exists.")
-    except Exception:
-        print(f"Table {TABLE_ID} not found. Creating table...")
-        print(f"Schema being used to create the table: {schema}")
-        table = bigquery.Table(table_ref, schema=schema)
-        client.create_table(table)
-        print(f"Table {TABLE_ID} created dynamically.")
+        return schema_field
 
-
-def infer_schema_from_message(message):
-    """Infer BigQuery schema from a Kafka message."""
-    print("Inferring schema from message...")
-
-    def infer_field(name, value):
-        if isinstance(value, int):
-            field_type = "INTEGER"
-        elif isinstance(value, float):
-            field_type = "FLOAT"
-        elif isinstance(value, dict):
-            field_type = "RECORD"
-        elif isinstance(value, list):
-            field_type = "REPEATED"
-        else:
-            field_type = "STRING"
-        return bigquery.SchemaField(name, field_type, mode="NULLABLE")
-
-    fields = []
-    for key, value in message.items():
-        if isinstance(value, dict):
-            subfields = [infer_field(subkey, subvalue) for subkey, subvalue in value.items()]
-            fields.append(bigquery.SchemaField(key, "RECORD", mode="NULLABLE", fields=subfields))
-        else:
-            fields.append(infer_field(key, value))
-    print(f"Inferred schema: {fields}")
-    return fields
-
-
-def consume_from_kafka():
-    """Consume messages from Kafka."""
-    print("Setting up Kafka consumer...")
-    consumer_config = {
-        'bootstrap.servers': KAFKA_BROKER,
-        'group.id': KAFKA_GROUP_ID,
-        'security.protocol': 'SASL_SSL',
-        'sasl.mechanisms': 'PLAIN',
-        'sasl.username': KAFKA_USERNAME,
-        'sasl.password': KAFKA_PASSWORD,
-        'auto.offset.reset': 'earliest',
+    # Build the JSON schema
+    json_schema = {
+        "$id": "http://example.com/myURI.schema.json",
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "Generated Schema",
+        "description": "Schema generated from BigQuery table.",
+        "type": "object",
+        "properties": {
+            field["name"]: process_field(field)
+            for field in bq_schema
+        },
+        "required": [field["name"] for field in bq_schema if field["mode"] == "REQUIRED"],
+        "additionalProperties": False
     }
 
-    consumer = Consumer(consumer_config)
-    consumer.subscribe([KAFKA_TOPIC])
-    print(f"Subscribed to topic {KAFKA_TOPIC}.")
-    return consumer
+    return json_schema
 
+# Read BigQuery schema from file
+with open('payload_in.json', 'r') as infile:
+    bq_schema = json.load(infile)
 
-def insert_into_bigquery(rows):
-    """Insert rows into BigQuery."""
-    print(f"Inserting {len(rows)} rows into BigQuery...")
-    client = bigquery.Client(project=PROJECT_ID)
-    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+# Convert to Schema Registry compatible schema
+schema_registry_payload = bq_to_schema_registry(bq_schema)
 
-    errors = client.insert_rows_json(table_ref, rows)
-    if errors:
-        print(f"Error inserting rows: {errors}")
-    else:
-        print(f"Successfully inserted {len(rows)} rows into BigQuery.")
-
-
-def parse_message(message):
-    """Parse a single Kafka message into JSON format."""
-    print("Parsing message...")
-    try:
-        data = json.loads(message.value().decode('utf-8'))
-        print(f"Message parsed successfully: {data}")
-        return data
-    except (json.JSONDecodeError, AttributeError) as e:
-        print(f"Error parsing message: {e}")
-        return None
-
-
-def main():
-    consumer = consume_from_kafka()
-    print("Starting to consume messages from Kafka...")
-
-    schema_inferred = False
-    schema = None
-
-    try:
-        while True:
-            print("Polling for new messages...")
-            msg = consumer.poll(1.0)  # Timeout in seconds
-            if msg is None:
-                print("No message received. Polling again...")
-                continue
-            if msg.error():
-                print(f"Kafka error: {msg.error()}")
-                continue
-
-            print("Message received. Parsing...")
-            data = parse_message(msg)
-            if data:
-                if not schema_inferred:
-                    print("Inferring schema for the first time...")
-                    schema = infer_schema_from_message(data)
-                    print(f"Schema inferred: {schema}")  # Print schema before table creation
-                    ensure_bigquery_table(schema)
-                    schema_inferred = True
-
-                print("Inserting data into BigQuery...")
-                insert_into_bigquery([data])  # Insert each message as a row
-    except KeyboardInterrupt:
-        print("Stopping consumer...")
-    finally:
-        consumer.close()
-        print("Consumer closed.")
-
-
-if __name__ == "__main__":
-    main()
+# Write Schema Registry schema to file
+with open('payload_out.json', 'w') as outfile:
+    json.dump(schema_registry_payload, outfile, indent=4)
