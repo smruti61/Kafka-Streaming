@@ -1,82 +1,52 @@
-import json
-from typing import Any, Dict, List
+syntax = "proto3";
 
-def bq_to_schema_registry(bq_schema: List[Dict[str, Any]]) -> Dict:
-    """
-    Convert BigQuery table schema to Schema Registry compatible JSON schema.
-    """
-    def map_bq_type(bq_type: str) -> str:
-        """Map BigQuery types to JSON schema types."""
-        mapping = {
-            "STRING": "string",
-            "INTEGER": "integer",
-            "FLOAT": "number",
-            "BOOLEAN": "boolean",
-            "RECORD": "object",
-            "TIMESTAMP": "string",
-            "DATE": "string",
-            "TIME": "string",
-            "DATETIME": "string"
-        }
-        return mapping.get(bq_type, "string")
+message AccountEvent {
+    string name = 1;
+}
+======================================
+protoc --python_out=. account_event.proto
+======================================
+from confluent_kafka import Producer
+import account_event_pb2  # Import the generated protobuf class
 
-    def process_field(field: Dict[str, Any]) -> Dict:
-        """Process a single field in the BigQuery schema."""
-        field_type = map_bq_type(field["type"])
-        schema_field = {
-            "type": field_type,
-            "description": field.get("description", f"The {field_type} type is used for {field['name']}.")
-        }
+# Kafka Configuration
+KAFKA_BROKER = 'kafka.sbs-bld.oncp.dev:9092'
+KAFKA_TOPIC = 'vault.core_api.v1.accounts.account_staging.events'
+KAFKA_GROUP_ID = 'plain-python-group'
+KAFKA_USERNAME = 'easy-access-user'
+KAFKA_PASSWORD = 'easy-access-secret'
 
-        # Handle nested RECORD types
-        if field["type"] == "RECORD" and field["fields"]:
-            schema_field["properties"] = {
-                sub_field["name"]: process_field(sub_field)
-                for sub_field in field["fields"]
-            }
+# Kafka producer configuration
+kafka_config = {
+    'bootstrap.servers': KAFKA_BROKER,
+    'security.protocol': 'SASL_SSL',
+    'sasl.mechanism': 'PLAIN',
+    'sasl.username': KAFKA_USERNAME,
+    'sasl.password': KAFKA_PASSWORD,
+    'acks': 'all'
+}
 
-        # Handle nullable fields using `oneOf`
-        if field["mode"] == "NULLABLE":
-            schema_field = {
-                "oneOf": [
-                    {"type": "null"},
-                    schema_field
-                ]
-            }
+# Create a Kafka producer
+producer = Producer(kafka_config)
 
-        # Handle repeated fields as arrays
-        if field["mode"] == "REPEATED":
-            schema_field = {
-                "type": "array",
-                "items": schema_field
-            }
+# Create and serialize Protobuf message
+def produce_protobuf_message():
+    try:
+        account_event = account_event_pb2.AccountEvent()
+        account_event.name = "John Doe"  # Example name
+        
+        # Serialize the Protobuf message
+        protobuf_message = account_event.SerializeToString()
 
-        return schema_field
+        # Produce the message to Kafka topic
+        producer.produce(KAFKA_TOPIC, value=protobuf_message)
+        producer.flush()
 
-    # Build the JSON schema
-    json_schema = {
-        "$id": "http://example.com/myURI.schema.json",
-        "$schema": "http://json-schema.org/draft-07/schema#",
-        "title": "Generated Schema",
-        "description": "Schema generated from BigQuery table.",
-        "type": "object",
-        "properties": {
-            field["name"]: process_field(field)
-            for field in bq_schema
-        },
-        "required": [field["name"] for field in bq_schema if field["mode"] == "REQUIRED"],
-        "additionalProperties": False
-    }
+        print(f"Protobuf message published successfully to topic: {KAFKA_TOPIC}")
 
-    return json_schema
+    except Exception as e:
+        print(f"Failed to publish message: {e}")
 
-# Read BigQuery schema from file
-with open('payload_in.json', 'r') as infile:
-    bq_schema = json.load(infile)
-
-# Convert to Schema Registry compatible schema
-schema_registry_payload = bq_to_schema_registry(bq_schema)
-
-# Write Schema Registry schema to file
-with open('payload_out.json', 'w') as outfile:
-    json.dump(schema_registry_payload, outfile, indent=4)
+# Run the producer
+if __name__ == "__main__":
+    produce_protobuf_message()
